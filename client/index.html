@@ -765,6 +765,204 @@
       .lang-switcher { gap: 1px; }
       .lang-btn { padding: 2px 5px; }
     }
+
+    /* ── UI FIXES: stable bus marker, visible route toggles, mobile bottom sheet ── */
+    .bm::before {
+      display: none !important;
+      animation: none !important;
+    }
+
+    .bm {
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .bus-panel {
+      height: 55vh;
+      max-height: 70vh;
+      will-change: transform;
+      touch-action: none;
+    }
+
+    .panel-handle {
+      width: 48px;
+      height: 5px;
+      border-radius: 999px;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .panel-handle:active {
+      cursor: grabbing;
+    }
+
+    .route-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    @media (max-width: 768px) {
+      body {
+        height: 100dvh;
+      }
+
+      header {
+        height: 52px;
+        padding: 0 10px;
+      }
+
+      .logo {
+        gap: 7px;
+      }
+
+      .logo-mark svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      .logo-text {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+      }
+
+      .main {
+        flex-direction: column;
+      }
+
+      #map {
+        order: 1;
+        flex: 1 1 auto;
+        min-height: 58dvh;
+        height: calc(100dvh - 52px - 190px - 34px);
+      }
+
+      .sidebar {
+        order: 2;
+        width: 100%;
+        height: 190px;
+        max-height: 34dvh;
+        border-right: none;
+        border-top: 1px solid var(--glass-border);
+        border-radius: 18px 18px 0 0;
+        box-shadow: var(--glass-hi), 0 -10px 28px rgba(14,42,51,0.10);
+      }
+
+      .sidebar-tabs {
+        padding: 0 8px;
+      }
+
+      .tab-btn {
+        padding: 13px 8px;
+        font-size: 8px;
+      }
+
+      .tab-content {
+        padding: 10px 12px;
+      }
+
+      .section-label {
+        font-size: 8px;
+        margin-bottom: 8px;
+      }
+
+      .bus-card,
+      .line-filter {
+        border-radius: 13px;
+        margin-bottom: 8px;
+      }
+
+      .bus-card {
+        padding: 10px 12px 10px 15px;
+      }
+
+      .bus-name {
+        font-size: 12px;
+      }
+
+      .bus-tag {
+        font-size: 7px;
+        padding: 3px 6px;
+      }
+
+      .bus-panel {
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 34px !important;
+        height: 68dvh;
+        max-height: 72dvh;
+        border-radius: 20px 20px 0 0;
+        transform: translateY(100%);
+      }
+
+      .bus-panel.open {
+        transform: translateY(0);
+      }
+
+      .panel-header {
+        padding: 12px 16px 8px;
+      }
+
+      .panel-stops {
+        padding: 0 16px 18px;
+      }
+
+      .panel-stop-row {
+        padding: 9px 0;
+        gap: 11px;
+      }
+
+      .panel-stop-name,
+      .panel-stop-eta {
+        font-size: 12px;
+      }
+
+      .status-bar {
+        height: 34px;
+        padding: 0 8px;
+        font-size: 8px;
+        gap: 4px;
+      }
+
+      .status-bar > span:last-child {
+        display: none;
+      }
+
+      .map-btn {
+        padding: 4px 7px;
+        font-size: 7px;
+      }
+
+      .toast {
+        left: 12px;
+        right: 12px;
+        bottom: 42px;
+        text-align: center;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .lang-btn {
+        padding: 3px 6px;
+        font-size: 7px;
+      }
+
+      .live-pill {
+        padding: 3px 8px;
+        font-size: 8px;
+      }
+
+      #map {
+        min-height: 56dvh;
+      }
+
+      .sidebar {
+        height: 180px;
+      }
+
+      .bus-panel {
+        height: 70dvh;
+      }
+    }
+
       </style>
 </head>
 <body>
@@ -826,7 +1024,7 @@
 
   <!-- Bottom slide-up panel -->
   <div class="bus-panel" id="bus-panel">
-    <div class="panel-handle" onclick="closePanel()"></div>
+    <div class="panel-handle" id="panel-handle" title="Drag up or down"></div>
     <div class="panel-header">
       <div class="panel-bus-info">
         <div class="panel-line-badge" id="panel-badge"></div>
@@ -885,6 +1083,9 @@ let selectedBusId = null, activeLines = {};
 let isSatellite = false, trafficVisible = false;
 let highlightLine = null; // bright route overlay on bus select
 let routeData = {}; // store fetched route coords
+const ROUTE_VISIBLE_OPACITY = 0.78;
+const ROUTE_MUTED_OPACITY = 0.25;
+const ROUTE_HIGHLIGHT_OPACITY = 0.95;
 
 const satelliteTile = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri', maxZoom: 19 });
 const labelsTile    = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: '© CARTO', maxZoom: 19, opacity: 0.9 });
@@ -897,6 +1098,20 @@ map = L.map('map', { zoomControl: false }).setView([42.001, 20.97], 14);
 map.on('click', () => { if (selectedBusId) closePanel(); });
 standardTile.addTo(map);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+function setRouteLineOpacity(lineId, opacity) {
+  if (routeLines[lineId]) routeLines[lineId].setStyle({ opacity });
+}
+
+function restoreRouteVisibility() {
+  Object.entries(routeLines).forEach(([lineId, line]) => {
+    line.setStyle({ opacity: activeLines[lineId] === false ? 0 : ROUTE_VISIBLE_OPACITY });
+  });
+}
+
+function refreshMapSize() {
+  setTimeout(() => map && map.invalidateSize(), 220);
+}
 
 function toggleMapMode() {
   isSatellite = !isSatellite;
@@ -991,19 +1206,26 @@ function selectBus(busId) {
   const bus = buses[busId];
   if (!bus) return;
 
-  // Highlight this bus's route — dim others, brighten this one
+  // Highlight selected bus route, but keep enabled routes visible
   if (highlightLine) { map.removeLayer(highlightLine); highlightLine = null; }
   Object.entries(routeLines).forEach(([lid, line]) => {
-    line.setStyle({ opacity: 0 });
+    const isActive = activeLines[lid] !== false;
+    line.setStyle({ opacity: isActive ? ROUTE_MUTED_OPACITY : 0 });
   });
+
   const route = routeData[bus.lineId];
-  if (route) {
+  if (route && activeLines[bus.lineId] !== false) {
     const latlngs = route.coords.map(c => [c[0], c[1]]);
-    highlightLine = L.polyline(latlngs, { color: bus.color, weight: 6, opacity: 0.95 }).addTo(map);
+    highlightLine = L.polyline(latlngs, {
+      color: bus.color,
+      weight: 7,
+      opacity: ROUTE_HIGHLIGHT_OPACITY
+    }).addTo(map);
   }
 
-  map.setView([bus.lat, bus.lng], 15);
+  map.setView([bus.lat, bus.lng], window.innerWidth <= 768 ? 14 : 15);
   openPanel(bus);
+  refreshMapSize();
 }
 
 async function openPanel(bus) {
@@ -1013,6 +1235,7 @@ async function openPanel(bus) {
   document.getElementById('panel-name').textContent = bus.name;
   document.getElementById('panel-sub').textContent = bus.lineName || '';
   panel.classList.add('open');
+  refreshMapSize();
 
   try {
     const res = await fetch(`/api/eta/${bus.busId}`);
@@ -1037,12 +1260,17 @@ async function openPanel(bus) {
 }
 
 function closePanel() {
-  document.getElementById('bus-panel').classList.remove('open');
+  const panel = document.getElementById('bus-panel');
+  panel.classList.remove('open');
+  panel.style.transform = '';
   selectedBusId = null;
-  // Restore route opacities
+
+  // Restore route opacities based on the toggle state
   if (highlightLine) { map.removeLayer(highlightLine); highlightLine = null; }
-  Object.values(routeLines).forEach(line => line.setStyle({ opacity: 0 }));
+  restoreRouteVisibility();
+
   document.querySelectorAll('.bus-card').forEach(c => c.classList.remove('selected'));
+  refreshMapSize();
 }
 
 async function loadETA(busId) {
@@ -1083,7 +1311,11 @@ async function loadRoutes() {
     activeLines[lineId] = true;
     routeData[lineId] = route; // store for highlight
     const latlngs = route.coords.map(c => [c[0],c[1]]);
-    routeLines[lineId] = L.polyline(latlngs, { color: route.color, weight: 5, opacity: 0 }).addTo(map);
+    routeLines[lineId] = L.polyline(latlngs, {
+      color: route.color,
+      weight: 5,
+      opacity: ROUTE_VISIBLE_OPACITY
+    }).addTo(map);
   });
   document.getElementById('line-filters').innerHTML = Object.entries(routes).map(([lineId, route]) => {
     const shortName = route.shortName || lineId.replace('line-','');
@@ -1150,12 +1382,30 @@ async function loadStops() {
 
 function toggleLine(lineId) {
   activeLines[lineId] = !activeLines[lineId];
-  document.getElementById('toggle-'+lineId).classList.toggle('off');
-  // Only show route line if this line's bus is selected
+
+  const toggle = document.getElementById('toggle-' + lineId);
+  if (toggle) toggle.classList.toggle('off', activeLines[lineId] === false);
+
+  // Show/hide the actual route line from the toggle
+  if (routeLines[lineId]) {
+    routeLines[lineId].setStyle({
+      opacity: activeLines[lineId] ? ROUTE_VISIBLE_OPACITY : 0
+    });
+  }
+
+  // Show/hide buses on that route
   Object.values(buses).forEach(bus => {
     if (bus.lineId !== lineId || !markers[bus.busId]) return;
-    if (activeLines[lineId]) markers[bus.busId].addTo(map); else map.removeLayer(markers[bus.busId]);
+    if (activeLines[lineId]) markers[bus.busId].addTo(map);
+    else map.removeLayer(markers[bus.busId]);
   });
+
+  // If the selected bus route was turned off, close the panel
+  if (selectedBusId && buses[selectedBusId]?.lineId === lineId && activeLines[lineId] === false) {
+    closePanel();
+  }
+
+  refreshMapSize();
 }
 
 async function loadHeatmapData() {
@@ -1428,6 +1678,68 @@ async function loadNearby(stopId) {
     showToast('Could not load nearby places', 'warn');
   }
 }
+
+// ── Draggable bottom panel ────────────────────────────────
+const busPanelEl = document.getElementById('bus-panel');
+const panelHandleEl = document.getElementById('panel-handle');
+
+let panelDragStartY = 0;
+let panelDragDeltaY = 0;
+let isPanelDragging = false;
+
+if (panelHandleEl && busPanelEl) {
+  panelHandleEl.addEventListener('click', (e) => {
+    // Simple click on handle closes the panel
+    if (!isPanelDragging && busPanelEl.classList.contains('open')) closePanel();
+  });
+
+  panelHandleEl.addEventListener('pointerdown', (e) => {
+    isPanelDragging = true;
+    panelDragStartY = e.clientY;
+    panelDragDeltaY = 0;
+    busPanelEl.style.transition = 'none';
+    panelHandleEl.setPointerCapture(e.pointerId);
+  });
+
+  panelHandleEl.addEventListener('pointermove', (e) => {
+    if (!isPanelDragging) return;
+
+    panelDragDeltaY = e.clientY - panelDragStartY;
+
+    // Drag down to close; small upward drag keeps it open
+    if (panelDragDeltaY > 0) {
+      busPanelEl.style.transform = `translateY(${panelDragDeltaY}px)`;
+    } else {
+      busPanelEl.style.transform = 'translateY(0)';
+    }
+  });
+
+  panelHandleEl.addEventListener('pointerup', (e) => {
+    if (!isPanelDragging) return;
+
+    isPanelDragging = false;
+    busPanelEl.style.transition = '';
+    try { panelHandleEl.releasePointerCapture(e.pointerId); } catch (_) {}
+
+    if (panelDragDeltaY > 110) {
+      closePanel();
+    } else {
+      busPanelEl.classList.add('open');
+      busPanelEl.style.transform = '';
+      refreshMapSize();
+    }
+
+    panelDragDeltaY = 0;
+  });
+
+  panelHandleEl.addEventListener('pointercancel', () => {
+    isPanelDragging = false;
+    busPanelEl.style.transition = '';
+    busPanelEl.style.transform = '';
+  });
+}
+
+window.addEventListener('resize', refreshMapSize);
 
 function showToast(msg, type='info') {
   const t = document.getElementById('toast');

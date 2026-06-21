@@ -10,8 +10,8 @@ const char* password = "Stella1177";
 
 // Your Node.js server
 // const char* serverUrl = "https://preoccupied-nondichogamic-linda.ngrok-free.dev/api/gps";
-const char* serverUrl = "https://f482-79-125-233-76.ngrok-free.app/api/gps";
-
+// const char* serverUrl = "https://f482-79-125-233-76.ngrok-free.app/api/gps";
+const char* serverUrl = "https://trackit-9ipy.onrender.com/api/gps";
 const char* deviceId  = "esp32-bus-1";
 //const char* deviceId = "esp32-bus-2";
 
