@@ -1,0 +1,1439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrackIt — Live Tracking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    :root {
+      --bg:       #EAF7F6;
+      --surface:  #FFFFFF;
+      --surface2: #F2FAFB;
+      --border:   rgba(45,110,130,0.14);
+      --border2:  rgba(31,182,214,0.40);
+      --accent:   #1AA6C9;
+      --accent2:  #2FD6A8;
+      --accent-l: rgba(26,166,201,0.12);
+      --green:    #10B981;
+      --green-l:  rgba(16,185,129,0.14);
+      --amber:    #F59E0B;
+      --amber-l:  rgba(245,158,11,0.14);
+      --red:      #F4486B;
+      --red-l:    rgba(244,72,107,0.12);
+      --text:     #0E2A33;
+      --text2:    #4D6A74;
+      --text3:    #8AA3AC;
+      --mono:     'IBM Plex Mono', monospace;
+      --sans:     'Plus Jakarta Sans', sans-serif;
+      --display:  'Syne', sans-serif;
+      /* light glass */
+      --glass:        rgba(255,255,255,0.52);
+      --glass-strong: rgba(255,255,255,0.72);
+      --glass-soft:   rgba(255,255,255,0.38);
+      --glass-border: rgba(255,255,255,0.80);
+      --glass-hi:     inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.18);
+      --blur:         saturate(170%) blur(20px);
+      --blur-sm:      saturate(160%) blur(10px);
+      /* soft airy shadows with a cool tint */
+      --shadow:    0 1px 2px rgba(14,42,51,0.05), 0 6px 18px rgba(14,42,51,0.07);
+      --shadow-md: 0 10px 30px rgba(14,42,51,0.10), 0 2px 8px rgba(14,42,51,0.05);
+      --shadow-lg: 0 18px 50px rgba(14,42,51,0.14), 0 6px 18px rgba(14,42,51,0.08);
+      --ring:      0 0 0 4px rgba(26,166,201,0.16);
+    }
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background-color: #EAF7F6;
+      background-image:
+        radial-gradient(1000px 580px at 8% -8%, rgba(47,214,168,0.28), transparent 60%),
+        radial-gradient(1000px 620px at 100% 0%, rgba(26,166,201,0.26), transparent 55%),
+        radial-gradient(820px 720px at 58% 116%, rgba(125,211,252,0.26), transparent 60%),
+        radial-gradient(700px 500px at 30% 60%, rgba(255,214,170,0.16), transparent 60%);
+      background-attachment: fixed;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    @keyframes fadeUp { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform:none; } }
+    ::selection { background: rgba(26,166,201,0.25); color: var(--text); }
+
+    /* ── Lang switcher ─────────────────────────── */
+    .lang-switcher { display:flex; gap:2px; }
+    .lang-btn {
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text3);
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: all 0.18s;
+    }
+    .lang-btn:hover { color: var(--text2); border-color: var(--border2); transform: translateY(-1px); }
+    .lang-btn.active { background: linear-gradient(120deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; box-shadow: 0 3px 10px rgba(36,81,230,0.3); }
+
+    /* ── Header ─────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      height: 60px;
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      border-bottom: 1px solid var(--glass-border);
+      flex-shrink: 0;
+      z-index: 200;
+      box-shadow: var(--glass-hi), 0 1px 0 rgba(26,166,201,0.22), 0 10px 30px rgba(14,42,51,0.10);
+      min-width: 0;
+      overflow: visible;
+    }
+    .logo { display:flex; align-items:center; gap:11px; }
+    .logo-mark svg { width:28px; height:28px; display:block; filter: drop-shadow(0 0 8px rgba(26,166,201,0.6)); }
+    .logo-text {
+      font-family: var(--display);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      background: linear-gradient(120deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 10px rgba(26,166,201,0.4));
+    }
+    .logo-divider {
+      width: 1px; height: 18px;
+      background: var(--border2);
+      margin: 0 6px;
+    }
+    .logo-sub {
+      font-size: 11px;
+      color: var(--text3);
+      font-weight: 500;
+      letter-spacing: 0.01em;
+    }
+    @media (max-width: 900px) { .logo-sub, .logo-divider { display: none; } }
+    .live-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--green-l);
+      border: 1px solid rgba(14,159,110,0.25);
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--green);
+      letter-spacing: 0.06em;
+      box-shadow: 0 0 0 0 rgba(16,185,129,0.5);
+      animation: liveGlow 2.6s ease-in-out infinite;
+    }
+    @keyframes liveGlow {
+      0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); }
+      50%     { box-shadow: 0 0 14px 1px rgba(16,185,129,0.4); }
+    }
+    .live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 0 rgba(16,185,129,0.7);
+      animation: livePulse 2s ease-out infinite;
+    }
+    @keyframes livePulse {
+      0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.65); }
+      70%  { box-shadow: 0 0 0 7px rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── Layout ──────────────────────────────────── */
+    .main { display:flex; flex:1; overflow:hidden; position:relative; }
+
+    /* ── Sidebar ─────────────────────────────────── */
+    .sidebar {
+      width: 312px;
+      background: var(--glass);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      border-right: 1px solid var(--glass-border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+      z-index: 10;
+      box-shadow: var(--glass-hi), 1px 0 0 rgba(26,166,201,0.16), var(--shadow-md);
+    }
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      padding: 0 6px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 16px 8px;
+      font-family: var(--mono);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      cursor: pointer;
+      background: none;
+      border: none;
+      color: var(--text3);
+      border-bottom: 2px solid transparent;
+      transition: color 0.18s, border-color 0.18s;
+      margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: var(--text2); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); text-shadow: 0 0 12px rgba(26,166,201,0.6); }
+
+    .tab-content { flex:1; overflow-y:auto; padding:16px; display:none; }
+    .tab-content.active { display:block; }
+    .tab-content::-webkit-scrollbar { width:3px; }
+    .tab-content::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+
+    .section-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text3);
+      margin-bottom: 10px;
+      margin-top: 2px;
+    }
+
+    /* ── Bus Cards ───────────────────────────────── */
+    .bus-card {
+      background: var(--glass);
+      -webkit-backdrop-filter: var(--blur-sm);
+      backdrop-filter: var(--blur-sm);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 13px 13px 13px 17px;
+      margin-bottom: 9px;
+      cursor: pointer;
+      transition: transform 0.2s cubic-bezier(0.32,0.72,0,1), border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--glass-hi), 0 6px 18px rgba(14,42,51,0.07);
+      animation: fadeUp 0.45s cubic-bezier(0.32,0.72,0,1) both;
+    }
+    .bus-card:hover { border-color: var(--border2); box-shadow: var(--glass-hi), var(--shadow-md); transform: translateY(-2px); background: var(--glass-soft); }
+    .bus-card.selected { border-color: transparent; background: var(--accent-l); box-shadow: var(--ring), var(--shadow); }
+    .bus-line-bar {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      border-radius: 14px 0 0 14px;
+      box-shadow: 2px 0 10px rgba(14,42,51,0.12);
+    }
+    .bus-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .bus-name {
+      font-family: var(--display);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .bus-tag {
+      font-family: var(--mono);
+      font-size: 8px;
+      padding: 3px 7px;
+      border-radius: 20px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    .tag-real { background: var(--green-l); color: var(--green); border: 1px solid rgba(15,157,88,0.2); }
+    .tag-sim  { background: var(--accent-l); color: var(--accent); border: 1px solid rgba(26,86,219,0.15); }
+    .bus-meta { display:flex; gap:16px; }
+    .bus-meta-item { font-size: 11px; color: var(--text3); }
+    .bus-meta-val { color: var(--text2); font-weight: 600; }
+
+    /* ── ETA Panel ───────────────────────────────── */
+    .eta-panel { margin-top: 16px; display:none; }
+    .eta-panel.visible { display:block; }
+    .eta-stop {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 11px;
+      background: var(--glass-soft);
+      -webkit-backdrop-filter: var(--blur-sm);
+      backdrop-filter: var(--blur-sm);
+      border-radius: 10px;
+      margin-bottom: 5px;
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-hi);
+    }
+    .eta-stop-name { font-size: 11px; color: var(--text2); }
+    .eta-time {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--amber);
+    }
+    .eta-time.soon { color: var(--green); }
+    .report-btn {
+      font-family: var(--mono);
+      font-size: 8px;
+      padding: 2px 7px;
+      background: none;
+      border: 1px solid var(--border2);
+      color: var(--text3);
+      border-radius: 20px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      transition: all 0.15s;
+      margin-left: 8px;
+    }
+    .report-btn:hover { border-color: var(--red); color: var(--red); background: var(--red-l); }
+
+    /* ── Route Filters ───────────────────────────── */
+    .line-filter {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 12px;
+      background: var(--glass);
+      -webkit-backdrop-filter: var(--blur-sm);
+      backdrop-filter: var(--blur-sm);
+      border-radius: 14px;
+      margin-bottom: 9px;
+      cursor: pointer;
+      border: 1px solid var(--glass-border);
+      transition: all 0.2s;
+      box-shadow: var(--glass-hi), 0 6px 18px rgba(14,42,51,0.07);
+    }
+    .line-filter:hover { border-color: var(--border2); box-shadow: var(--glass-hi), var(--shadow-md); transform: translateY(-2px); }
+    .line-badge {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .line-info { flex: 1; min-width: 0; }
+    .line-name { font-size: 11px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .line-sub  { font-size: 10px; color: var(--text3); margin-top: 1px; }
+    .toggle-track {
+      width: 32px; height: 18px;
+      background: var(--accent);
+      border-radius: 9px;
+      position: relative;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .toggle-track.off { background: var(--border2); }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      background: white;
+      border-radius: 50%;
+      top: 2px;
+      transition: left 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .toggle-track:not(.off)::after { left: 16px; }
+    .toggle-track.off::after { left: 2px; }
+
+    /* ── Map ─────────────────────────────────────── */
+    #map { flex:1; position: relative; }
+    /* soft top sheen + gentle edge so the light map reads airy */
+    .main::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      box-shadow: inset 0 0 120px rgba(14,42,51,0.06);
+      background: radial-gradient(130% 90% at 50% 0%, rgba(255,255,255,0.18) 0%, transparent 40%);
+    }
+
+
+    .map-btn {
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      padding: 5px 13px;
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text2);
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: all 0.18s;
+      box-shadow: var(--glass-hi), var(--shadow);
+    }
+    .map-btn:hover { color: var(--accent); transform: translateY(-1px); box-shadow: var(--glass-hi), var(--shadow-md); }
+    .map-btn.active { background: linear-gradient(120deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(36,81,230,0.35); }
+
+    /* ── Status bar ──────────────────────────────── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 40px;
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      border-top: 1px solid var(--glass-border);
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text3);
+      flex-shrink: 0;
+      letter-spacing: 0.03em;
+      position: relative;
+      z-index: 1001;
+      gap: 8px;
+      box-shadow: var(--glass-hi), 0 -2px 20px rgba(14,42,51,0.06);
+    }
+    #status-text::before {
+      content: '';
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-right: 7px;
+      vertical-align: middle;
+      box-shadow: 0 0 8px rgba(16,185,129,0.8);
+    }
+
+    /* ── Toast ───────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 44px;
+      left: 320px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      color: var(--text2);
+      z-index: 9999;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      box-shadow: var(--shadow-md);
+    }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .toast.success { border-color: rgba(15,157,88,0.3); color: var(--green); }
+    .toast.info    { border-color: rgba(26,86,219,0.3); color: var(--accent); }
+    .toast.warn    { border-color: rgba(217,119,6,0.3); color: var(--amber); }
+
+    /* ── Leaflet overrides ───────────────────────── */
+    .leaflet-container { background: #DCEFEE; font-family: var(--sans); }
+    .leaflet-popup-content-wrapper {
+      border-radius: 14px;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--glass-border);
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      color: var(--text);
+    }
+    .leaflet-popup-content-wrapper a { color: var(--accent); }
+    .leaflet-popup-tip-container { display: none; }
+    .leaflet-control-zoom { border: none !important; box-shadow: var(--shadow-md) !important; border-radius: 10px !important; overflow: hidden; }
+    .leaflet-control-zoom a {
+      background: var(--glass-strong) !important;
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      color: var(--accent) !important;
+      border-color: var(--glass-border) !important;
+    }
+    .leaflet-control-zoom a:hover { background: rgba(26,166,201,0.14) !important; color: var(--accent) !important; }
+    .leaflet-control-attribution { background: rgba(255,255,255,0.7) !important; color: var(--text3) !important; }
+    .leaflet-control-attribution a { color: var(--text2) !important; }
+
+    /* ── Bottom slide panel ──────────────────────── */
+    .bus-panel {
+      position: fixed;
+      bottom: 40px; left: 312px; right: 0;
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      border-top: 1px solid var(--glass-border);
+      border-radius: 20px 20px 0 0;
+      box-shadow: var(--glass-hi), 0 -10px 40px rgba(14,42,51,0.12), 0 0 40px rgba(26,166,201,0.07);
+      z-index: 1000;
+      transform: translateY(100%);
+      transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+      max-height: 50vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .bus-panel.open { transform: translateY(0); }
+    .panel-handle {
+      width: 36px; height: 4px;
+      background: var(--border2);
+      border-radius: 2px;
+      margin: 10px auto 0;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px 10px;
+      flex-shrink: 0;
+    }
+    .panel-bus-info { display:flex; align-items:center; gap:12px; }
+    .panel-line-badge {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .panel-bus-name {
+      font-family: var(--display);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .panel-bus-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+    .panel-close {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: var(--text3);
+      flex-shrink: 0;
+    }
+    .panel-stops { overflow-y: auto; padding: 0 20px 20px; flex: 1; }
+    .panel-stops::-webkit-scrollbar { width: 3px; }
+    .panel-stops::-webkit-scrollbar-thumb { background: var(--border2); }
+    .panel-stop-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-stop-row:last-child { border-bottom: none; }
+    .stop-node {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      border: 2px solid currentColor;
+      background: white;
+      flex-shrink: 0;
+    }
+    .stop-node.passed { background: currentColor; }
+    .panel-stop-name { flex: 1; font-size: 13px; color: var(--text); font-weight: 500; }
+    .panel-stop-eta { font-family: var(--mono); font-size: 13px; font-weight: 600; text-align: right; }
+
+    /* ── Bus marker ──────────────────────────────── */
+    .bm {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid rgba(255,255,255,0.9);
+      cursor: pointer;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.95), 0 0 16px 2px rgba(26,166,201,0.5), 0 6px 16px rgba(14,42,51,0.25);
+      transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+      position: relative;
+    }
+    .bm::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 50%;
+      background: inherit;
+      opacity: 0.6;
+      z-index: -1;
+      animation: busPulse 2.2s ease-out infinite;
+    }
+    @keyframes busPulse {
+      0%   { transform: scale(1);   opacity: 0.55; }
+      70%  { transform: scale(2.3); opacity: 0; }
+      100% { transform: scale(2.3); opacity: 0; }
+    }
+    .bm:hover { transform: scale(1.18); }
+    .bm svg { width: 21px; height: 21px; }
+    .bm.real {
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.95), 0 0 22px 3px rgba(16,185,129,0.8), 0 0 0 4px rgba(16,185,129,0.45);
+    }
+
+    /* ── Arrival recommendation card ──────────────── */
+    .rec-card {
+      position: fixed;
+      top: 76px; right: 18px;
+      width: 350px; max-width: calc(100vw - 36px);
+      max-height: calc(100vh - 140px);
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
+      border: 1px solid var(--glass-border);
+      border-radius: 18px;
+      box-shadow: var(--glass-hi), var(--shadow-lg);
+      z-index: 1200;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      transform: translateX(calc(100% + 28px)) scale(0.98);
+      opacity: 0;
+      transition: transform 0.46s cubic-bezier(0.32,0.72,0,1), opacity 0.32s;
+    }
+    .rec-card.show { transform: translateX(0) scale(1); opacity: 1; }
+    @media (max-width: 720px) {
+      .rec-card { top: auto; bottom: 52px; right: 8px; left: 8px; width: auto; max-height: 55vh; }
+    }
+    .rec-head {
+      display: flex; align-items: center; gap: 11px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(120deg, rgba(26,166,201,0.14), rgba(47,214,168,0.12));
+      position: relative;
+    }
+    .rec-head::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+      background: linear-gradient(180deg, var(--accent), var(--accent2));
+    }
+    .rec-badge {
+      width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 800; font-size: 14px; font-family: var(--display);
+      box-shadow: 0 4px 12px rgba(19,26,43,0.18);
+    }
+    .rec-head-text { flex: 1; min-width: 0; }
+    .rec-head-label {
+      font-family: var(--mono); font-size: 9px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase; color: var(--green);
+    }
+    .rec-head-stop {
+      font-size: 15px; font-weight: 700; color: var(--text); font-family: var(--display);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .rec-close {
+      width: 28px; height: 28px; flex-shrink: 0; cursor: pointer;
+      border: none; background: rgba(26,166,201,0.10); color: var(--text2); font-size: 15px;
+      border-radius: 8px; transition: all 0.18s;
+    }
+    .rec-close:hover { background: rgba(26,166,201,0.2); color: #fff; transform: rotate(90deg); }
+    .rec-body { overflow-y: auto; padding: 6px 0; }
+    .rec-body::-webkit-scrollbar { width: 4px; }
+    .rec-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+    .rec-section-label {
+      font-family: var(--mono); font-size: 9px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase; color: var(--text3);
+      padding: 12px 16px 5px;
+    }
+    .rec-item {
+      display: flex; align-items: center; gap: 11px;
+      padding: 10px 16px; border-bottom: 1px solid rgba(230,234,242,0.6);
+      transition: background 0.15s;
+      animation: fadeUp 0.4s cubic-bezier(0.32,0.72,0,1) both;
+    }
+    .rec-item:hover { background: rgba(26,166,201,0.06); }
+    .rec-item:nth-child(2) { animation-delay: 0.04s; }
+    .rec-item:nth-child(3) { animation-delay: 0.08s; }
+    .rec-item:nth-child(4) { animation-delay: 0.12s; }
+    .rec-item:nth-child(5) { animation-delay: 0.16s; }
+    .rec-item:nth-child(6) { animation-delay: 0.20s; }
+    .rec-item:last-child { border-bottom: none; }
+    .rec-item-ico {
+      width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, rgba(26,166,201,0.18), rgba(47,214,168,0.18)); font-size: 16px;
+    }
+    .rec-item-main { flex: 1; min-width: 0; }
+    .rec-item-name {
+      font-size: 13px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .rec-item-meta {
+      font-size: 11px; color: var(--text3); margin-top: 2px;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .rec-star { color: var(--amber); font-weight: 700; }
+    .rec-open { color: var(--green); font-weight: 600; }
+    .rec-closed { color: var(--red); font-weight: 600; }
+    .rec-pill {
+      font-family: var(--mono); font-size: 9px; padding: 2px 7px;
+      border-radius: 10px; background: rgba(26,166,201,0.08); border: 1px solid var(--border); color: var(--text2);
+    }
+    .rec-empty { padding: 8px 16px 12px; font-size: 12px; color: var(--text3); }
+    .rec-note {
+      padding: 9px 16px; font-size: 10px; color: var(--amber);
+      background: var(--amber-l); border-top: 1px solid var(--border);
+    }
+
+    /* ══════════════════════════════════════════════
+       MOBILE RESPONSIVE — max-width: 768px
+    ══════════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      /* Header */
+      header { padding: 0 12px; height: 48px; }
+      .logo-text { font-size: 12px; }
+      .logo-sub, .logo-divider { display: none; }
+      .live-pill { padding: 3px 8px; font-size: 9px; }
+      .lang-btn { padding: 3px 6px; font-size: 8px; }
+
+      /* Layout — stack vertically */
+      .main { flex-direction: column; }
+
+      /* Sidebar becomes bottom sheet */
+      .sidebar {
+        width: 100%;
+        height: 42vh;
+        border-right: none;
+        border-top: 1px solid var(--border);
+        order: 2;
+        flex-shrink: 0;
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.06);
+      }
+      .tab-content { padding: 10px 12px; }
+
+      /* Map takes top portion */
+      #map { order: 1; flex: 1; min-height: 58vh; }
+
+      /* Bus cards more compact */
+      .bus-card { padding: 8px 10px 8px 14px; margin-bottom: 4px; }
+      .bus-name { font-size: 12px; }
+      .bus-meta-item { font-size: 10px; }
+
+      /* Bottom panel full width on mobile */
+      .bus-panel {
+        left: 0 !important;
+        bottom: 0 !important;
+        border-radius: 16px 16px 0 0;
+        max-height: 60vh;
+      }
+      .panel-bus-name { font-size: 13px; }
+      .panel-stop-name { font-size: 12px; }
+      .panel-stop-eta { font-size: 12px; }
+
+      /* Status bar compact */
+      .status-bar {
+        height: 32px;
+        padding: 0 10px;
+        font-size: 9px;
+      }
+      .status-bar > span:last-child { display: none; }
+      .map-btn { padding: 3px 8px; font-size: 8px; }
+
+      /* Stop popup narrower */
+      .leaflet-popup-content-wrapper { max-width: 180px !important; }
+
+      /* ETA panel */
+      .eta-stop { padding: 7px 8px; }
+      .eta-stop-name { font-size: 10px; }
+      .eta-time { font-size: 11px; }
+    }
+
+    /* Very small screens */
+    @media (max-width: 380px) {
+      .sidebar { height: 45vh; }
+      #map { min-height: 55vh; }
+      .lang-switcher { gap: 1px; }
+      .lang-btn { padding: 2px 5px; }
+    }
+      </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">
+      <svg viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="5" width="22" height="13" rx="3" fill="#1A56DB" opacity="0.1"/>
+        <rect x="2" y="5" width="22" height="13" rx="3" stroke="#1A56DB" stroke-width="1.5"/>
+        <rect x="4" y="8" width="7" height="4" rx="1" fill="#1A56DB" opacity="0.4"/>
+        <rect x="15" y="8" width="7" height="4" rx="1" fill="#1A56DB" opacity="0.4"/>
+        <line x1="13" y1="6" x2="13" y2="17" stroke="#1A56DB" stroke-width="1" opacity="0.3"/>
+        <circle cx="7" cy="20" r="2" fill="#1A56DB"/>
+        <circle cx="19" cy="20" r="2" fill="#1A56DB"/>
+        <line x1="2" y1="15" x2="24" y2="15" stroke="#1A56DB" stroke-width="1" opacity="0.3"/>
+      </svg>
+    </div>
+    <span class="logo-text">TracklT</span>
+    <div class="logo-divider"></div>
+    <span class="logo-sub" data-i18n="subtitle">Real-time tracking</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="lang-switcher">
+      <button class="lang-btn active" onclick="setLang('sq')">SQ</button>
+      <button class="lang-btn" onclick="setLang('en')">EN</button>
+      <button class="lang-btn" onclick="setLang('mk')">MK</button>
+    </div>
+    <div class="live-pill">
+      <div class="live-dot"></div>
+      <span data-i18n="live">Live</span>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="tab-btn active" onclick="switchTab('buses')" data-i18n="vehicles">Vehicles</button>
+      <button class="tab-btn" onclick="switchTab('lines')" data-i18n="routes">Routes</button>
+    </div>
+
+    <div class="tab-content active" id="tab-buses">
+      <div class="section-label" data-i18n="active_vehicles">Active vehicles</div>
+      <div id="bus-list"></div>
+      <div class="eta-panel" id="eta-panel">
+        <div class="section-label" style="margin-top:18px" data-i18n="arrival_times">Arrival times</div>
+        <div id="eta-list"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-lines">
+      <div class="section-label" data-i18n="toggle_routes">Toggle routes</div>
+      <div id="line-filters"></div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Bottom slide-up panel -->
+  <div class="bus-panel" id="bus-panel">
+    <div class="panel-handle" onclick="closePanel()"></div>
+    <div class="panel-header">
+      <div class="panel-bus-info">
+        <div class="panel-line-badge" id="panel-badge"></div>
+        <div>
+          <div class="panel-bus-name" id="panel-name"></div>
+          <div class="panel-bus-sub" id="panel-sub"></div>
+        </div>
+      </div>
+      <div class="panel-close" onclick="closePanel()">&#x2715;</div>
+    </div>
+    <div class="panel-stops" id="panel-stops"></div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span id="status-text">Connecting to server...</span>
+  <div style="display:flex;gap:4px">
+    <button class="map-btn" id="heatmap-btn" onclick="toggleHeatmap()">Heatmap</button>
+    <button class="map-btn" id="traffic-btn" onclick="toggleTraffic()">Traffic</button>
+    <button class="map-btn" id="mapmode-btn" onclick="toggleMapMode()">Satellite</button>
+    <button class="map-btn" onclick="centerMap()">Center</button>
+  </div>
+  <span style="color:var(--text3)" data-i18n="system_name">Track IT Transit System — v1.0</span>
+</div>
+
+<!-- Arrival recommendation card -->
+<div class="rec-card" id="rec-card">
+  <div class="rec-head">
+    <div class="rec-badge" id="rec-badge"></div>
+    <div class="rec-head-text">
+      <div class="rec-head-label" id="rec-label">Arrived</div>
+      <div class="rec-head-stop" id="rec-stop"></div>
+    </div>
+    <button class="rec-close" onclick="hideRecCard()">&#x2715;</button>
+  </div>
+  <div class="rec-body" id="rec-body"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let GOOGLE_API_KEY = ''; // loaded securely from server
+
+// Fetch config from server (keeps API keys out of client code)
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    GOOGLE_API_KEY = cfg.googleMapsKey || '';
+  } catch(e) { console.warn('Config load failed'); }
+}
+
+const socket = io();
+let map, buses = {}, markers = {}, routeLines = {}, heatmapLayer = null, heatmapVisible = false;
+let selectedBusId = null, activeLines = {};
+let isSatellite = false, trafficVisible = false;
+let highlightLine = null; // bright route overlay on bus select
+let routeData = {}; // store fetched route coords
+
+const satelliteTile = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri', maxZoom: 19 });
+const labelsTile    = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: '© CARTO', maxZoom: 19, opacity: 0.9 });
+const standardTile  = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© CARTO', maxZoom: 19 });
+const googleTrafficTile = L.tileLayer(`https://mt0.google.com/vt/lyrs=h,traffic&x={x}&y={y}&z={z}&key=${GOOGLE_API_KEY}`, { attribution: '© Google', maxZoom: 19, opacity: 0.85 });
+
+// Map init (config loaded async before tiles need key)
+loadConfig();
+map = L.map('map', { zoomControl: false }).setView([42.001, 20.97], 14);
+map.on('click', () => { if (selectedBusId) closePanel(); });
+standardTile.addTo(map);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+function toggleMapMode() {
+  isSatellite = !isSatellite;
+  const btn = document.getElementById('mapmode-btn');
+  if (isSatellite) {
+    map.removeLayer(standardTile);
+    satelliteTile.addTo(map); labelsTile.addTo(map);
+    btn.textContent = 'Standard'; btn.classList.add('active');
+  } else {
+    map.removeLayer(satelliteTile); map.removeLayer(labelsTile);
+    standardTile.addTo(map);
+    btn.textContent = 'Satellite'; btn.classList.remove('active');
+  }
+}
+
+function toggleTraffic() {
+  trafficVisible = !trafficVisible;
+  const btn = document.getElementById('traffic-btn');
+  btn.classList.toggle('active', trafficVisible);
+  if (trafficVisible) {
+    if (GOOGLE_API_KEY === 'YOUR_GOOGLE_MAPS_API_KEY') {
+      showToast('Add your Google API key first', 'warn');
+      trafficVisible = false; btn.classList.remove('active'); return;
+    }
+    googleTrafficTile.addTo(map);
+  } else {
+    map.removeLayer(googleTrafficTile);
+  }
+}
+
+socket.on('connect', () => {
+  document.getElementById('status-text').textContent = t('connected');
+});
+socket.on('disconnect', () => {
+  document.getElementById('status-text').textContent = t('disconnected');
+});
+socket.on('initialState', (data) => {
+  data.buses.forEach(b => updateBus(b));
+  loadRoutes();
+  loadHeatmapData();
+  setInterval(loadStops, 10000);
+});
+socket.on('busUpdate', (data) => { data.buses.forEach(b => updateBus(b)); });
+socket.on('delayReport', (data) => { showToast('Delay reported at ' + data.stopId, 'warn'); });
+
+// Geofence arrival → show nearby cafes + events
+let lastArrivalKey = null;
+socket.on('busArrival', (a) => {
+  // Optionally only show arrivals for the bus the user is tracking.
+  // To show ALL arrivals, delete the next line.
+  if (selectedBusId && a.busId !== selectedBusId) return;
+
+  const key = a.busId + ':' + a.stop.id;
+  if (key === lastArrivalKey) return; // avoid duplicate render
+  lastArrivalKey = key;
+  showRecCard(a, t('arrived_at'));
+});
+
+function updateBus(bus) {
+  buses[bus.busId] = bus;
+  if (activeLines[bus.lineId] === false) return;
+  if (markers[bus.busId]) {
+    markers[bus.busId].setLatLng([bus.lat, bus.lng]);
+  } else {
+    const icon = L.divIcon({
+      html: `<div class="bm ${bus.isReal?'real':''}" style="background:${bus.color}">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="5" width="20" height="13" rx="2.5" fill="white" opacity="0.95"/>
+          <rect x="3.5" y="7" width="6" height="4" rx="1" fill="${bus.color}" opacity="0.7"/>
+          <rect x="14.5" y="7" width="6" height="4" rx="1" fill="${bus.color}" opacity="0.7"/>
+          <line x1="12" y1="5.5" x2="12" y2="17.5" stroke="${bus.color}" stroke-width="0.8" opacity="0.4"/>
+          <line x1="2" y1="14" x2="22" y2="14" stroke="${bus.color}" stroke-width="0.8" opacity="0.4"/>
+          <circle cx="7" cy="19.5" r="1.8" fill="white" stroke="${bus.color}" stroke-width="1.2"/>
+          <circle cx="17" cy="19.5" r="1.8" fill="white" stroke="${bus.color}" stroke-width="1.2"/>
+        </svg>
+      </div>`,
+      className: '', iconSize: [38,38], iconAnchor: [19,19]
+    });
+    markers[bus.busId] = L.marker([bus.lat, bus.lng], { icon })
+      .addTo(map).on('click', () => selectBus(bus.busId));
+  }
+  renderBusList();
+  if (selectedBusId === bus.busId) loadETA(bus.busId);
+}
+
+function selectBus(busId) {
+  selectedBusId = busId;
+  document.querySelectorAll('.bus-card').forEach(c => c.classList.remove('selected'));
+  const card = document.getElementById('card-'+busId);
+  if (card) card.classList.add('selected');
+  switchTab('buses');
+  const bus = buses[busId];
+  if (!bus) return;
+
+  // Highlight this bus's route — dim others, brighten this one
+  if (highlightLine) { map.removeLayer(highlightLine); highlightLine = null; }
+  Object.entries(routeLines).forEach(([lid, line]) => {
+    line.setStyle({ opacity: 0 });
+  });
+  const route = routeData[bus.lineId];
+  if (route) {
+    const latlngs = route.coords.map(c => [c[0], c[1]]);
+    highlightLine = L.polyline(latlngs, { color: bus.color, weight: 6, opacity: 0.95 }).addTo(map);
+  }
+
+  map.setView([bus.lat, bus.lng], 15);
+  openPanel(bus);
+}
+
+async function openPanel(bus) {
+  const panel = document.getElementById('bus-panel');
+  document.getElementById('panel-badge').style.background = bus.color;
+  document.getElementById('panel-badge').textContent = bus.shortName || '1';
+  document.getElementById('panel-name').textContent = bus.name;
+  document.getElementById('panel-sub').textContent = bus.lineName || '';
+  panel.classList.add('open');
+
+  try {
+    const res = await fetch(`/api/eta/${bus.busId}`);
+    const stops = await res.json();
+    const stopsHTML = stops.map((s, i) => {
+      const passed = s.eta < 0;
+      const etaText = passed ? t('passed') : s.eta <= 1 ? t('arriving') : `${s.eta} min`;
+      const etaColor = passed ? 'var(--text3)' : s.eta <= 2 ? 'var(--green)' : s.eta <= 5 ? 'var(--amber)' : 'var(--text2)';
+      const isLast = i === stops.length - 1;
+      return `
+        <div class="panel-stop-row">
+          <div style="display:flex;flex-direction:column;align-items:center;width:12px;flex-shrink:0">
+            <div class="stop-node ${passed?'passed':''}" style="color:${bus.color}"></div>
+            ${!isLast ? `<div style="width:2px;height:28px;background:${bus.color};opacity:0.25;margin-top:2px"></div>` : ''}
+          </div>
+          <div class="panel-stop-name">${getStopName(s.id) || s.name}</div>
+          <div class="panel-stop-eta" style="color:${etaColor}">${etaText}</div>
+        </div>`;
+    }).join('');
+    document.getElementById('panel-stops').innerHTML = stopsHTML;
+  } catch(e) {}
+}
+
+function closePanel() {
+  document.getElementById('bus-panel').classList.remove('open');
+  selectedBusId = null;
+  // Restore route opacities
+  if (highlightLine) { map.removeLayer(highlightLine); highlightLine = null; }
+  Object.values(routeLines).forEach(line => line.setStyle({ opacity: 0 }));
+  document.querySelectorAll('.bus-card').forEach(c => c.classList.remove('selected'));
+}
+
+async function loadETA(busId) {
+  try {
+    const res = await fetch(`/api/eta/${busId}`);
+    const stops = await res.json();
+    document.getElementById('eta-list').innerHTML = stops.map(s => `
+      <div class="eta-stop">
+        <div class="eta-stop-name">${getStopName(s.id) || s.name}</div>
+        <div style="display:flex;align-items:center">
+          <div class="eta-time ${s.eta<=2?'soon':''}">${s.eta} min</div>
+          <button class="report-btn" onclick="reportDelay('${s.id}','${buses[busId]?.lineId}')">${t('report')}</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+function renderBusList() {
+  document.getElementById('bus-list').innerHTML = Object.values(buses).map(bus => `
+    <div class="bus-card ${selectedBusId===bus.busId?'selected':''}" id="card-${bus.busId}" onclick="selectBus('${bus.busId}')">
+      <div class="bus-line-bar" style="background:${bus.color}"></div>
+      <div class="bus-card-header">
+        <span class="bus-name">${bus.name}</span>
+        <span class="bus-tag ${bus.isReal?'tag-real':'tag-sim'}">${bus.isReal?t('live_gps'):t('simulated')}</span>
+      </div>
+      <div class="bus-meta">
+        <div class="bus-meta-item"><span class="bus-meta-val">${(bus.speed||0).toFixed(0)}</span> km/h</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadRoutes() {
+  const res = await fetch('/api/routes');
+  const routes = await res.json();
+  Object.entries(routes).forEach(([lineId, route]) => {
+    activeLines[lineId] = true;
+    routeData[lineId] = route; // store for highlight
+    const latlngs = route.coords.map(c => [c[0],c[1]]);
+    routeLines[lineId] = L.polyline(latlngs, { color: route.color, weight: 5, opacity: 0 }).addTo(map);
+  });
+  document.getElementById('line-filters').innerHTML = Object.entries(routes).map(([lineId, route]) => {
+    const shortName = route.shortName || lineId.replace('line-','');
+    const routeNames = {
+      'line-1': { sq: 'UEJL ↔ Pallma Mall', en: 'UEJL ↔ Palma Mall', mk: 'УEJL ↔ Палма Мол' },
+      'line-2': { sq: 'Çepçishtë ↔ UEJL', en: 'Çepçishte ↔ UEJL', mk: 'Цепчиште ↔ ЈИЕУ' },
+    };
+    const desc = (routeNames[lineId] && routeNames[lineId][currentLang]) || route.name.split(' - ')[1] || route.name;
+    return `
+      <div class="line-filter" onclick="toggleLine('${lineId}')">
+        <div class="line-badge" style="background:${route.color}">${shortName}</div>
+        <div class="line-info">
+          <div class="line-name">${desc}</div>
+        </div>
+        <div class="toggle-track" id="toggle-${lineId}"></div>
+      </div>`;
+  }).join('');
+  loadStops();
+}
+
+async function loadStops() {
+  try {
+    const res = await fetch('/api/stops');
+    const stops = await res.json();
+    stops.forEach(stop => {
+      const schedRows = stop.lineETAs.map(l => {
+        const deps = (l.nextDepartures||[]).slice(0,2).map(d => {
+          const color = d.diffMins <= 0 ? '#10B981' : d.diffMins <= 5 ? '#F59E0B' : '#4D6A74';
+          const label = d.diffMins <= 0 ? 'Now' : `${d.diffMins} min`;
+          return `<div style="display:flex;justify-content:space-between;padding:3px 0">
+            <span style="font-size:11px;color:#4D6A74">${d.time}</span>
+            <span style="font-size:11px;font-weight:600;color:${color}">${label}</span>
+          </div>`;
+        }).join('');
+        const busEta = l.eta !== null && l.eta <= 15
+          ? `<span style="font-size:10px;color:${l.color};font-weight:600"> · ${l.eta} min</span>` : '';
+        return `<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(120,160,220,0.15)">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+            <div style="background:${l.color};color:#fff;font-weight:700;font-size:9px;padding:1px 6px;border-radius:3px">${l.shortName||'1'}</div>
+            ${busEta}
+          </div>
+          ${deps||'<div style="font-size:10px;color:#8AA3AC">No more today</div>'}
+        </div>`;
+      }).join('');
+
+      const stopColor = stop.lines.includes('line-2') ? '#8B5CF6' : '#1A56DB';
+      const icon = L.divIcon({
+        html: `<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid ${stopColor};box-shadow:0 1px 4px rgba(0,0,0,0.18);position:relative">
+          <div style="width:5px;height:5px;border-radius:50%;background:${stopColor};position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"></div>
+        </div>`,
+        className:'', iconSize:[14,14], iconAnchor:[7,7]
+      });
+
+      L.marker([stop.lat, stop.lng], { icon }).addTo(map).bindPopup(`
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;width:200px;padding:2px">
+          <div style="font-weight:700;font-size:14px;color:#0E2A33;margin-bottom:6px;line-height:1.3">${getStopName(stop.id) || stop.name}</div>
+          ${schedRows}
+          <button onclick="loadNearby('${stop.id}')" style="width:100%;margin-top:6px;padding:7px;border:1px solid rgba(26,166,201,0.4);border-radius:8px;background:rgba(26,166,201,0.12);color:#0E7D97;font-weight:700;font-size:12px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:0.03em">☕ ${t('nearby_btn')}</button>
+        </div>
+      `, { maxWidth: 210, className: 'stop-popup' });
+    });
+  } catch(e) { console.error(e); }
+}
+
+function toggleLine(lineId) {
+  activeLines[lineId] = !activeLines[lineId];
+  document.getElementById('toggle-'+lineId).classList.toggle('off');
+  // Only show route line if this line's bus is selected
+  Object.values(buses).forEach(bus => {
+    if (bus.lineId !== lineId || !markers[bus.busId]) return;
+    if (activeLines[lineId]) markers[bus.busId].addTo(map); else map.removeLayer(markers[bus.busId]);
+  });
+}
+
+async function loadHeatmapData() {
+  const res = await fetch('/api/heatmap');
+  const data = await res.json();
+  const points = data.map(s => [s.lat, s.lng, s.intensity/100]);
+  heatmapLayer = L.heatLayer(points, { radius: 40, blur: 28, maxZoom: 17, gradient: { 0.2:'#93C5FD', 0.5:'#F59E0B', 0.8:'#EF4444', 1.0:'#991B1B' } });
+}
+
+async function toggleHeatmap() {
+  if (!heatmapLayer) await loadHeatmapData();  // ← load on first click
+  heatmapVisible = !heatmapVisible;
+  document.getElementById('heatmap-btn').classList.toggle('active');
+  if (heatmapVisible && heatmapLayer) heatmapLayer.addTo(map);
+  else if (heatmapLayer) map.removeLayer(heatmapLayer);
+  showToast(heatmapVisible ? 'Demand heatmap on' : 'Heatmap off', 'info');
+}
+
+async function reportDelay(stopId, lineId) {
+  await fetch('/api/report', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({stopId,lineId}) });
+  showToast('Delay reported. Thank you.', 'success');
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', ['buses','lines'][i]===name));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+function centerMap() { map.setView([42.001, 20.97], 14); }
+
+// ── Stop name translations ────────────────────────────────
+const stopNames = {
+  // Line 1
+  'UEJL':      { sq: 'UEJL',              en: 'UEJL',                  mk: 'УEJL' },
+  'MOLINO':    { sq: 'Molino',     en: 'Molino',        mk: 'Молино' },
+  'ANTILOP':   { sq: 'Hit Mobilje',        en: 'Hit Mobilje',           mk: 'Хит Мобиље' },
+  'SHIPADI':   { sq: 'Shipadi',            en: 'Shipadi',               mk: 'Шипади' },
+  'MAKPET':    { sq: 'Mak Petrol',         en: 'Mak Petrol',            mk: 'Мак Петрол' },
+  'ROTRING':   { sq: 'Rotring',   en: 'Rotring',      mk: 'Ротринг' },
+  'XHAMIA':    { sq: 'Xhamia e Larme',     en: 'Colorful Mosque',       mk: 'Шарена Џамија' },
+  'SPARKASSE': { sq: 'Shparkasse Bank',    en: 'Sparkasse Bank',        mk: 'Шпаркасе Банка' },
+  'PALLATI':   { sq: 'Pallati i Kulturës', en: 'Palace of Culture',     mk: 'Палата на Културата' },
+  'VERO':      { sq: 'Vero Jumbo',         en: 'Vero Jumbo',            mk: 'Веро Џумбо' },
+  'PALMA':     { sq: 'Pallma Mall',        en: 'Palma Mall',            mk: 'Палма Мол' },
+  // Line 2
+  'L2A': { sq: 'F. Çepçishtë',                    en: 'V. Çepçishte',                   mk: 'С. Цепчиште' },
+  'L2B': { sq: 'F. Poroj - Xhamia Drenovc',       en: 'V. Poroj - Drenovc Mosque',      mk: 'С. Пороj - Џамија Дреновец' },
+  'L2C': { sq: 'SHF "7 Marsi" - Kopshti Potok',   en: 'School "7 March" - Potok',       mk: 'О.С.У "7 Марси" - Детска Градинка' },
+  'L2D': { sq: 'Shkolla e Muzikës',                en: 'Music School',                   mk: 'Музичко Училиште' },
+  'L2E': { sq: 'Gjykata (Qendra)',                 en: 'Court (Center)',                 mk: 'Суд (Центар)' },
+  'L2F': { sq: 'Xhamia e Larmë - Mostar',         en: 'Colorful Mosque - Mostar',       mk: 'Шарена Џамија - Мостар' },
+  'L2G': { sq: 'Zegin',             en: 'Zegin',           mk: 'Zegin' },
+  'L2H': { sq: '"Antilop" Mobel',                  en: '"Antilop" Furniture',            mk: '"Антилоп" Мобел' },
+  'L2I': { sq: 'Ultra',                 en: 'Ultra',                mk: 'Ultra' },
+  'L2J': { sq: 'UEJL (Shtull)',                    en: 'UEJL (Shtull)',                  mk: 'ЈИЕУ (Штул)' },
+};
+
+function getStopName(stopId) {
+  if (!stopId) return '';
+  const entry = stopNames[stopId];
+  if (!entry) return stopId;
+  return entry[currentLang] || entry.en || stopId;
+}
+
+// ── Translations ──────────────────────────────────────────
+const translations = {
+  sq: {
+    live: 'Live',
+    subtitle: 'Gjurmim në kohë reale',
+    vehicles: 'Automjetet',
+    routes: 'Linjat',
+    active_vehicles: 'Automjetet aktive',
+    arrival_times: 'Koha e mbërritjes',
+    toggle_routes: 'Filtro linjat',
+    system_name: 'Sistemi i Transportit Tetovë — v1.0',
+    connected: 'Connected — duke marrë të dhëna live',
+    disconnected: 'Shkëputur — duke u rilidhjur...',
+    simulated: 'I simuluar',
+    live_gps: 'GPS Live',
+    passed: 'Kaluar',
+    arriving: 'Po mbërrin',
+    report: 'Raporto',
+    heatmap: 'Harta termike',
+    traffic: 'Trafiku',
+    satellite: 'Satelit',
+    standard: 'Standard',
+    center: 'Qendro',
+    arrived_at: 'Mbërriti në',
+    near_label: 'Afër kësaj ndalese',
+    nearby_places: 'Kafe & restorante afër',
+    nearby_events: 'Ngjarje afër',
+    open_now: 'Hapur',
+    closed: 'Mbyllur',
+    no_places: 'Asnjë vend afër.',
+    no_events: 'Asnjë ngjarje afër.',
+    nearby_btn: 'Çfarë ka afër',
+    sample_note: 'Të dhëna shembull — shto çelësin Google Places API për të dhëna reale.',
+  },
+  en: {
+    live: 'Live',
+    subtitle: 'Real-time tracking',
+    vehicles: 'Vehicles',
+    routes: 'Routes',
+    active_vehicles: 'Active vehicles',
+    arrival_times: 'Arrival times',
+    toggle_routes: 'Toggle routes',
+    system_name: 'Tetovo Transit System — v1.0',
+    connected: 'Connected — receiving live data',
+    disconnected: 'Disconnected — reconnecting...',
+    simulated: 'Simulated',
+    live_gps: 'Live GPS',
+    passed: 'Passed',
+    arriving: 'Arriving',
+    report: 'Report',
+    heatmap: 'Heatmap',
+    traffic: 'Traffic',
+    satellite: 'Satellite',
+    standard: 'Standard',
+    center: 'Center',
+    arrived_at: 'Arrived at',
+    near_label: 'Near this stop',
+    nearby_places: 'Cafes & food nearby',
+    nearby_events: 'Events nearby',
+    open_now: 'Open',
+    closed: 'Closed',
+    no_places: 'No places found nearby.',
+    no_events: 'No events nearby.',
+    nearby_btn: "What's nearby",
+    sample_note: 'Sample data — add a Google Places API key for live results.',
+  },
+  mk: {
+    live: 'Во живо',
+    subtitle: 'Следење во реално време',
+    vehicles: 'Возила',
+    routes: 'Линии',
+    active_vehicles: 'Активни возила',
+    arrival_times: 'Времиња на пристигнување',
+    toggle_routes: 'Филтрирај линии',
+    system_name: 'Систем за транспорт Тетово — v1.0',
+    connected: 'Поврзан — прима live податоци',
+    disconnected: 'Исклучен — се поврзувам...',
+    simulated: 'Симулиран',
+    live_gps: 'GPS во живо',
+    passed: 'Поминато',
+    arriving: 'Пристигнува',
+    report: 'Пријави',
+    heatmap: 'Топлинска карта',
+    traffic: 'Сообраќај',
+    satellite: 'Сателит',
+    standard: 'Стандард',
+    center: 'Центрирај',
+    arrived_at: 'Пристигна на',
+    near_label: 'Близу оваа постојка',
+    nearby_places: 'Кафулиња и храна во близина',
+    nearby_events: 'Настани во близина',
+    open_now: 'Отворено',
+    closed: 'Затворено',
+    no_places: 'Нема места во близина.',
+    no_events: 'Нема настани во близина.',
+    nearby_btn: 'Што има во близина',
+    sample_note: 'Примерок податоци — додај Google Places API клуч за вистински резултати.',
+  },
+};
+
+let currentLang = 'sq';
+
+function setLang(lang) {
+  currentLang = lang;
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.textContent === lang.toUpperCase()));
+  const t = translations[lang];
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (t[key]) el.textContent = t[key];
+  });
+  // Update dynamic buttons
+  document.getElementById('heatmap-btn').textContent = t.heatmap;
+  document.getElementById('traffic-btn').textContent = t.traffic;
+  document.getElementById('mapmode-btn').textContent = isSatellite ? t.standard : t.satellite;
+  // Re-render everything with new lang
+  renderBusList();
+  loadStops(); // reload stop markers with translated names
+  if (selectedBusId) loadETA(selectedBusId); // reload ETA panel
+  document.getElementById('status-text').textContent = t.connected;
+}
+
+function t(key) { return translations[currentLang][key] || translations.en[key] || key; }
+
+// ── Nearby recommendations card ───────────────────────────
+let recCardTimer = null;
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function iconFor(kind) {
+  const k = (kind || '').toLowerCase();
+  if (k.includes('coffee') || k.includes('cafe') || k.includes('café')) return '☕';
+  if (k.includes('bakery')) return '🥐';
+  if (k.includes('bar') || k.includes('pub')) return '🍺';
+  if (k.includes('restaurant') || k.includes('food')) return '🍽️';
+  if (k.includes('attraction') || k.includes('museum') || k.includes('park') || k.includes('sight')) return '📷';
+  return '📍';
+}
+
+function showRecCard(data, headerLabel) {
+  const stopName = data.stop ? data.stop.name : data.stopName;
+  const places = data.places || [];
+  const events = data.events || [];
+
+  document.getElementById('rec-label').textContent = headerLabel || t('arrived_at');
+  document.getElementById('rec-stop').textContent = getStopName(data.stop ? data.stop.id : data.stopId) || stopName || '';
+  const badge = document.getElementById('rec-badge');
+  badge.style.background = data.color || 'var(--accent)';
+  badge.textContent = (data.busName || '').replace(/\D/g, '').slice(0, 3) || '☕';
+
+  const placesHTML = places.length ? places.map(p => `
+    <div class="rec-item">
+      <div class="rec-item-ico">${iconFor(p.kind)}</div>
+      <div class="rec-item-main">
+        <div class="rec-item-name">${esc(p.name)}</div>
+        <div class="rec-item-meta">
+          ${p.rating ? `<span class="rec-star">★ ${p.rating}</span><span>(${p.reviews||0})</span>` : ''}
+          ${p.openNow === true ? `<span class="rec-open">${t('open_now')}</span>` : p.openNow === false ? `<span class="rec-closed">${t('closed')}</span>` : ''}
+          ${p.distance != null ? `<span class="rec-pill">${p.distance} m</span>` : ''}
+        </div>
+      </div>
+    </div>`).join('') : `<div class="rec-empty">${t('no_places')}</div>`;
+
+  const eventsHTML = events.length ? events.map(e => `
+    <div class="rec-item">
+      <div class="rec-item-ico">🎫</div>
+      <div class="rec-item-main">
+        <div class="rec-item-name">${esc(e.title)}</div>
+        <div class="rec-item-meta">
+          <span>${esc(e.venue)}</span>
+          ${e.when ? `<span>· ${esc(e.when)}</span>` : ''}
+          ${e.category ? `<span class="rec-pill">${esc(e.category)}</span>` : ''}
+        </div>
+      </div>
+    </div>`).join('') : `<div class="rec-empty">${t('no_events')}</div>`;
+
+  document.getElementById('rec-body').innerHTML = `
+    <div class="rec-section-label">☕ ${t('nearby_places')}</div>
+    ${placesHTML}
+    <div class="rec-section-label">🎫 ${t('nearby_events')}</div>
+    ${eventsHTML}
+    ${data.source === 'sample' ? `<div class="rec-note">${t('sample_note')}</div>` : ''}
+  `;
+
+  document.getElementById('rec-card').classList.add('show');
+  clearTimeout(recCardTimer);
+  recCardTimer = setTimeout(hideRecCard, 18000);
+}
+
+function hideRecCard() {
+  document.getElementById('rec-card').classList.remove('show');
+  clearTimeout(recCardTimer);
+}
+
+// Manually fetch nearby places for a stop (from the stop popup button)
+async function loadNearby(stopId) {
+  map.closePopup();
+  try {
+    const res = await fetch('/api/nearby/' + stopId);
+    const data = await res.json();
+    showRecCard(data, t('near_label'));
+  } catch (e) {
+    showToast('Could not load nearby places', 'warn');
+  }
+}
+
+function showToast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = `toast show ${type}`;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
