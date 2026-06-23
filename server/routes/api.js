@@ -18,13 +18,26 @@ router.get('/config', (req, res) => {
 });
 
 // ESP32 posts GPS here
+// ESP32 posts GPS here
 router.post('/gps', async (req, res) => {
   const { deviceId, lat, lng, speed } = req.body;
-  if (!deviceId || lat === undefined || lng === undefined)
+
+  if (!deviceId || lat === undefined || lng === undefined) {
     return res.status(400).json({ error: 'Missing fields' });
+  }
+
+  const latitude = Number(lat);
+  const longitude = Number(lng);
+  const busSpeed = Number(speed) || 0;
+
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+    return res.status(400).json({ error: 'Invalid coordinates' });
+  }
 
   updateBus(deviceId, {
-    lat, lng, speed,
+    lat: latitude,
+    lng: longitude,
+    speed: busSpeed,
     lineId: 'line-1',
     lineName: 'Line 1 - SEEU ↔ Palma Mall',
     shortName: '1',
@@ -33,10 +46,11 @@ router.post('/gps', async (req, res) => {
     passengers: 0,
     isReal: true,
   });
+
   req.io.emit('busUpdate', { buses: getBusPositions() });
 
-  // Geofence check for the real bus — fire arrival recommendations
   const thisBus = getBusPositions().find(b => b.busId === deviceId);
+
   if (thisBus) {
     geofence.checkBus(thisBus, (arrival) => {
       console.log(`📍 ${arrival.busName} arrived at ${arrival.stop.name}`);
@@ -46,12 +60,23 @@ router.post('/gps', async (req, res) => {
 
   try {
     await db.query(
-      'INSERT INTO gps_logs (bus_id, lat, lng, speed) VALUES ($1, $2, $3, $4)',
-      [deviceId, lat, lng, speed || 0]
+      `INSERT INTO buses (id, name, route_id, is_real)
+       VALUES ($1, $2, $3, TRUE)
+       ON CONFLICT (id) DO NOTHING`,
+      [deviceId, 'Real Bus (ESP32)', 'line-1']
     );
-  } catch (err) { console.error('DB write error:', err.message); }
 
-  console.log(`📡 GPS: ${deviceId} → ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    await db.query(
+      `INSERT INTO gps_logs (bus_id, lat, lng, speed)
+       VALUES ($1, $2, $3, $4)`,
+      [deviceId, latitude, longitude, busSpeed]
+    );
+  } catch (err) {
+    console.error('DB write error:', err.message);
+  }
+
+  console.log(`📡 GPS: ${deviceId} → ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+
   res.json({ ok: true });
 });
 

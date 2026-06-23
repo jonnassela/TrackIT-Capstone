@@ -1,7 +1,7 @@
 require('dotenv').config({ path: __dirname + '/.env' });
 const { Pool } = require('pg');
 
-// Railway provides DATABASE_URL; fallback to individual vars for local dev
+
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
