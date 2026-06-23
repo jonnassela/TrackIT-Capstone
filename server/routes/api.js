@@ -210,4 +210,219 @@ router.get('/nearby/:stopId', async (req, res) => {
   }
 });
 
+router.post('/chatbot', async (req, res) => {
+  const { question } = req.body;
+
+  if (!question) {
+    return res.status(400).json({ error: 'Question is required' });
+  }
+
+  const q = question.toLowerCase();
+
+  function distanceKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) *
+      Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) ** 2;
+
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  try {
+    let busId;
+    let busLat;
+    let busLng;
+    let currentSpeed;
+    let recordedAt;
+    let source;
+
+    // 1. First use LIVE bus from memory/map
+    const liveBuses = getBusPositions();
+
+    const liveBus =
+  liveBuses.find(b => b.isReal === true) ||
+  liveBuses.find(b => b.busId === 'esp32-bus-1' || b.id === 'esp32-bus-1') ||
+  liveBuses.find(b => b.busId === 'bus-201' || b.id === 'bus-201') ||
+  liveBuses[0];
+
+    if (liveBus) {
+      busId = liveBus.busId || liveBus.id || 'esp32-bus-1';
+      busLat = Number(liveBus.lat);
+      busLng = Number(liveBus.lng);
+      currentSpeed = Number(liveBus.speed) || 0;
+      recordedAt = 'live now';
+      source = 'live GPS';
+    } else {
+      // 2. If live bus is not available, fallback to latest database record
+      const latest = await db.query(`
+        SELECT bus_id, lat, lng, speed, recorded_at
+        FROM gps_logs
+        WHERE bus_id = 'esp32-bus-1'
+        ORDER BY recorded_at DESC
+        LIMIT 1
+      `);
+
+      if (!latest.rows.length) {
+        return res.json({
+          answer: 'I do not have live or saved GPS data yet.'
+        });
+      }
+
+      const bus = latest.rows[0];
+
+      busId = bus.bus_id;
+      busLat = Number(bus.lat);
+      busLng = Number(bus.lng);
+      currentSpeed = Number(bus.speed) || 0;
+      recordedAt = bus.recorded_at;
+      source = 'database history';
+    }
+
+    if (Number.isNaN(busLat) || Number.isNaN(busLng)) {
+      return res.json({
+        answer: 'GPS data exists, but the coordinates are invalid.'
+      });
+    }
+
+    const avgResult = await db.query(`
+      SELECT AVG(speed) AS avg_speed
+      FROM gps_logs
+      WHERE bus_id = 'esp32-bus-1'
+        AND speed > 3
+    `);
+
+    let avgSpeed = Number(avgResult.rows[0].avg_speed);
+
+    if (!avgSpeed || avgSpeed < 5) {
+      avgSpeed = 18;
+    }
+
+    const stops = Object.values(getAllStops());
+
+    const stopsWithDistance = stops.map(stop => ({
+      ...stop,
+      distance: distanceKm(busLat, busLng, stop.lat, stop.lng)
+    })).sort((a, b) => a.distance - b.distance);
+
+    const nearestStop = stopsWithDistance[0];
+
+    let selectedStop = nearestStop;
+
+    for (const stop of stops) {
+      const name = (stop.name || '').toLowerCase();
+
+      if (
+        q.includes(name) ||
+        q.includes('seeu') ||
+        q.includes('uejl') ||
+        q.includes('universitet')
+      ) {
+        if (
+          name.includes('seeu') ||
+          name.includes('uejl') ||
+          name.includes('universitet')
+        ) {
+          selectedStop = stop;
+          break;
+        }
+      }
+
+      if (q.includes('palma') && name.includes('palma')) {
+        selectedStop = stop;
+        break;
+      }
+
+      if (q.includes('qendra') && name.includes('qendra')) {
+        selectedStop = stop;
+        break;
+      }
+
+      if (q.includes('mall') && name.includes('mall')) {
+        selectedStop = stop;
+        break;
+      }
+    }
+
+    const distanceToSelected = distanceKm(
+      busLat,
+      busLng,
+      selectedStop.lat,
+      selectedStop.lng
+    );
+
+    const etaMinutes = Math.max(
+      1,
+      Math.round((distanceToSelected / avgSpeed) * 60)
+    );
+
+    if (
+      q.includes('where') ||
+      q.includes('location') ||
+      q.includes('ku') ||
+      q.includes('pozicion')
+    ) {
+      return res.json({
+        answer: `The real bus is currently near ${nearestStop.name}. Coordinates: ${busLat.toFixed(5)}, ${busLng.toFixed(5)}. Speed: ${currentSpeed.toFixed(1)} km/h. Source: ${source}. Time: ${recordedAt}.`
+      });
+    }
+
+    if (
+      q.includes('when') ||
+      q.includes('arrive') ||
+      q.includes('eta') ||
+      q.includes('kur') ||
+      q.includes('mberrin') ||
+      q.includes('mbërrin')
+    ) {
+      return res.json({
+        answer: `The bus is about ${distanceToSelected.toFixed(2)} km from ${selectedStop.name}. Based on historical GPS speed (${avgSpeed.toFixed(1)} km/h), ETA is around ${etaMinutes} minutes. Source: ${source}.`
+      });
+    }
+
+    if (
+      q.includes('delay') ||
+      q.includes('late') ||
+      q.includes('vones')
+    ) {
+      if (currentSpeed < 3) {
+        return res.json({
+          answer: `The bus may be stopped or moving very slowly. Current speed is ${currentSpeed.toFixed(1)} km/h, while the usual average is about ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
+        });
+      }
+
+      if (currentSpeed < avgSpeed * 0.5) {
+        return res.json({
+          answer: `Possible delay detected. Current speed is ${currentSpeed.toFixed(1)} km/h, much lower than the historical average of ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
+        });
+      }
+
+      return res.json({
+        answer: `No major delay detected. Current speed is ${currentSpeed.toFixed(1)} km/h and historical average is about ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
+      });
+    }
+
+    if (
+      q.includes('speed') ||
+      q.includes('average') ||
+      q.includes('shpejt')
+    ) {
+      return res.json({
+        answer: `Historical average speed is about ${avgSpeed.toFixed(1)} km/h. Latest/live speed is ${currentSpeed.toFixed(1)} km/h. Source: ${source}.`
+      });
+    }
+
+    return res.json({
+      answer: `I can answer about ETA, current location, speed, and delays. The bus is currently near ${nearestStop.name}. Source: ${source}.`
+    });
+
+  } catch (err) {
+    console.error('Chatbot error:', err.message);
+    res.status(500).json({ error: 'Chatbot failed' });
+  }
+});
 module.exports = router;
