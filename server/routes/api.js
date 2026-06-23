@@ -234,48 +234,80 @@ router.post('/chatbot', async (req, res) => {
   }
 
   try {
+    let requestedBusId = null;
+
+    if (
+      q.includes('esp') ||
+      q.includes('esp32') ||
+      q.includes('real') ||
+      q.includes('gps')
+    ) {
+      requestedBusId = 'esp32-bus-1';
+    }
+
+    if (
+      q.includes('201') ||
+      q.includes('bus 201') ||
+      q.includes('simulator') ||
+      q.includes('simulated')
+    ) {
+      requestedBusId = 'bus-201';
+    }
+
     let busId;
+    let busName;
     let busLat;
     let busLng;
     let currentSpeed;
     let recordedAt;
     let source;
 
-    // 1. First use LIVE bus from memory/map
     const liveBuses = getBusPositions();
 
-    const liveBus =
-  liveBuses.find(b => b.isReal === true) ||
-  liveBuses.find(b => b.busId === 'esp32-bus-1' || b.id === 'esp32-bus-1') ||
-  liveBuses.find(b => b.busId === 'bus-201' || b.id === 'bus-201') ||
-  liveBuses[0];
+    let liveBus = null;
+
+    if (requestedBusId) {
+      liveBus = liveBuses.find(b =>
+        b.busId === requestedBusId ||
+        b.id === requestedBusId
+      );
+    } else {
+      liveBus =
+        liveBuses.find(b => b.busId === 'esp32-bus-1' || b.id === 'esp32-bus-1') ||
+        liveBuses.find(b => b.isReal === true) ||
+        liveBuses.find(b => b.busId === 'bus-201' || b.id === 'bus-201') ||
+        liveBuses[0];
+    }
 
     if (liveBus) {
-      busId = liveBus.busId || liveBus.id || 'esp32-bus-1';
+      busId = liveBus.busId || liveBus.id;
+      busName = liveBus.name || busId;
       busLat = Number(liveBus.lat);
       busLng = Number(liveBus.lng);
       currentSpeed = Number(liveBus.speed) || 0;
       recordedAt = 'live now';
-      source = 'live GPS';
+      source = busId === 'esp32-bus-1' ? 'live ESP32 GPS' : 'live simulator';
     } else {
-      // 2. If live bus is not available, fallback to latest database record
+      const fallbackBusId = requestedBusId || 'esp32-bus-1';
+
       const latest = await db.query(`
         SELECT bus_id, lat, lng, speed, recorded_at
         FROM gps_logs
-        WHERE bus_id = 'esp32-bus-1'
+        WHERE bus_id = $1
         ORDER BY recorded_at DESC
         LIMIT 1
-      `);
+      `, [fallbackBusId]);
 
       if (!latest.rows.length) {
         return res.json({
-          answer: 'I do not have live or saved GPS data yet.'
+          answer: `I do not have live or saved GPS data for ${fallbackBusId}.`
         });
       }
 
       const bus = latest.rows[0];
 
       busId = bus.bus_id;
+      busName = busId === 'esp32-bus-1' ? 'Real Bus ESP32' : busId;
       busLat = Number(bus.lat);
       busLng = Number(bus.lng);
       currentSpeed = Number(bus.speed) || 0;
@@ -292,14 +324,14 @@ router.post('/chatbot', async (req, res) => {
     const avgResult = await db.query(`
       SELECT AVG(speed) AS avg_speed
       FROM gps_logs
-      WHERE bus_id = 'esp32-bus-1'
+      WHERE bus_id = $1
         AND speed > 3
-    `);
+    `, [busId]);
 
     let avgSpeed = Number(avgResult.rows[0].avg_speed);
 
     if (!avgSpeed || avgSpeed < 5) {
-      avgSpeed = 18;
+      avgSpeed = busId === 'bus-201' ? 25 : 18;
     }
 
     const stops = Object.values(getAllStops());
@@ -317,7 +349,6 @@ router.post('/chatbot', async (req, res) => {
       const name = (stop.name || '').toLowerCase();
 
       if (
-        q.includes(name) ||
         q.includes('seeu') ||
         q.includes('uejl') ||
         q.includes('universitet')
@@ -346,6 +377,11 @@ router.post('/chatbot', async (req, res) => {
         selectedStop = stop;
         break;
       }
+
+      if (q.includes(name)) {
+        selectedStop = stop;
+        break;
+      }
     }
 
     const distanceToSelected = distanceKm(
@@ -367,7 +403,7 @@ router.post('/chatbot', async (req, res) => {
       q.includes('pozicion')
     ) {
       return res.json({
-        answer: `The real bus is currently near ${nearestStop.name}. Coordinates: ${busLat.toFixed(5)}, ${busLng.toFixed(5)}. Speed: ${currentSpeed.toFixed(1)} km/h. Source: ${source}. Time: ${recordedAt}.`
+        answer: `${busName} is currently near ${nearestStop.name}. Coordinates: ${busLat.toFixed(5)}, ${busLng.toFixed(5)}. Speed: ${currentSpeed.toFixed(1)} km/h. Source: ${source}. Time: ${recordedAt}.`
       });
     }
 
@@ -380,7 +416,7 @@ router.post('/chatbot', async (req, res) => {
       q.includes('mbërrin')
     ) {
       return res.json({
-        answer: `The bus is about ${distanceToSelected.toFixed(2)} km from ${selectedStop.name}. Based on historical GPS speed (${avgSpeed.toFixed(1)} km/h), ETA is around ${etaMinutes} minutes. Source: ${source}.`
+        answer: `${busName} is about ${distanceToSelected.toFixed(2)} km from ${selectedStop.name}. Based on average speed (${avgSpeed.toFixed(1)} km/h), ETA is around ${etaMinutes} minutes. Source: ${source}.`
       });
     }
 
@@ -391,18 +427,18 @@ router.post('/chatbot', async (req, res) => {
     ) {
       if (currentSpeed < 3) {
         return res.json({
-          answer: `The bus may be stopped or moving very slowly. Current speed is ${currentSpeed.toFixed(1)} km/h, while the usual average is about ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
+          answer: `${busName} may be stopped or moving very slowly. Current speed is ${currentSpeed.toFixed(1)} km/h, while the usual average is about ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
         });
       }
 
       if (currentSpeed < avgSpeed * 0.5) {
         return res.json({
-          answer: `Possible delay detected. Current speed is ${currentSpeed.toFixed(1)} km/h, much lower than the historical average of ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
+          answer: `Possible delay detected for ${busName}. Current speed is ${currentSpeed.toFixed(1)} km/h, much lower than the average of ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
         });
       }
 
       return res.json({
-        answer: `No major delay detected. Current speed is ${currentSpeed.toFixed(1)} km/h and historical average is about ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
+        answer: `No major delay detected for ${busName}. Current speed is ${currentSpeed.toFixed(1)} km/h and average is about ${avgSpeed.toFixed(1)} km/h. Source: ${source}.`
       });
     }
 
@@ -412,12 +448,12 @@ router.post('/chatbot', async (req, res) => {
       q.includes('shpejt')
     ) {
       return res.json({
-        answer: `Historical average speed is about ${avgSpeed.toFixed(1)} km/h. Latest/live speed is ${currentSpeed.toFixed(1)} km/h. Source: ${source}.`
+        answer: `${busName} average speed is about ${avgSpeed.toFixed(1)} km/h. Latest/live speed is ${currentSpeed.toFixed(1)} km/h. Source: ${source}.`
       });
     }
 
     return res.json({
-      answer: `I can answer about ETA, current location, speed, and delays. The bus is currently near ${nearestStop.name}. Source: ${source}.`
+      answer: `I can answer about ETA, current location, speed, and delays. Please ask for "real bus" or "bus 201".`
     });
 
   } catch (err) {
