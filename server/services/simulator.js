@@ -14,7 +14,17 @@ function emitArrival(io) {
 const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 
 // ─── Line 1 simple simulator (progress-based) ──────────────────────────────
-const line1Buses = [];
+// const line1Buses = [];
+const line1Buses = [
+  {
+    id: 'bus-test-uejl-palma',
+    name: 'Test Bus UEJL → Palma',
+    lineId: 'line-1',
+    progress: 0,
+    direction: 1,
+    speed: 22
+  }
+];
 
 function interpolate(coords, progress) {
   const total = coords.length - 1;

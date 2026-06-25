@@ -253,6 +253,13 @@ router.post('/chatbot', async (req, res) => {
     ) {
       requestedBusId = 'bus-201';
     }
+    if (
+  q.includes('test') ||
+  q.includes('uejl') ||
+  q.includes('palma')
+) {
+  requestedBusId = 'bus-test-uejl-palma';
+}
 
     let busId;
     let busName;
@@ -395,6 +402,54 @@ router.post('/chatbot', async (req, res) => {
       1,
       Math.round((distanceToSelected / avgSpeed) * 60)
     );
+    let routeEtaMinutes = etaMinutes;
+
+const route = routes[busId === 'bus-201' ? 'line-2' : 'line-1'];
+
+if (route && route.stops) {
+  const stopsOnRoute = route.stops;
+  const speed = Math.max(currentSpeed || avgSpeed || 18, 5);
+
+  let closestIdx = 0;
+  let minDist = Infinity;
+
+  stopsOnRoute.forEach((stop, i) => {
+    const d = Math.sqrt(
+      Math.pow(busLat - stop.lat, 2) +
+      Math.pow(busLng - stop.lng, 2)
+    );
+
+    if (d < minDist) {
+      minDist = d;
+      closestIdx = i;
+    }
+  });
+
+  let cumulativeEta = calculateETA(
+    busLat,
+    busLng,
+    stopsOnRoute[closestIdx].lat,
+    stopsOnRoute[closestIdx].lng,
+    speed
+  );
+
+  for (let i = closestIdx; i < stopsOnRoute.length; i++) {
+    if (stopsOnRoute[i].id === selectedStop.id) {
+      routeEtaMinutes = Math.max(1, Math.round(cumulativeEta));
+      break;
+    }
+
+    if (i + 1 < stopsOnRoute.length) {
+      cumulativeEta += calculateETA(
+        stopsOnRoute[i].lat,
+        stopsOnRoute[i].lng,
+        stopsOnRoute[i + 1].lat,
+        stopsOnRoute[i + 1].lng,
+        speed
+      );
+    }
+  }
+}
 
     if (
       q.includes('where') ||
@@ -416,8 +471,7 @@ router.post('/chatbot', async (req, res) => {
       q.includes('mbërrin')
     ) {
       return res.json({
-        answer: `${busName} is about ${distanceToSelected.toFixed(2)} km from ${selectedStop.name}. Based on average speed (${avgSpeed.toFixed(1)} km/h), ETA is around ${etaMinutes} minutes. Source: ${source}.`
-      });
+          answer: `${busName} is estimated to arrive at ${selectedStop.name} in about ${routeEtaMinutes} minutes. Source: ${source}.`      });
     }
 
     if (
