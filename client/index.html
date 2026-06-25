@@ -1338,8 +1338,20 @@ async function openPanel(bus) {
   const panel = document.getElementById('bus-panel');
   document.getElementById('panel-badge').style.background = bus.color;
   document.getElementById('panel-badge').textContent = bus.shortName || '1';
-  document.getElementById('panel-name').textContent = bus.name;
-  document.getElementById('panel-sub').textContent = bus.lineName || '';
+  document.getElementById('panel-sub').innerHTML = bus.lineName || '';
+
+if (bus.busId === 'bus-201' && bus.googleTrafficDurationMin) {
+  document.getElementById('panel-sub').innerHTML = `
+    ${bus.lineName || ''}<br>
+    <span style="color:var(--accent);font-family:var(--mono);font-size:10px">
+      Segment: ${bus.currentSegment || '-'}
+    </span><br>
+    <span style="color:var(--amber);font-family:var(--mono);font-size:10px">
+      Google Traffic: ${bus.googleTrafficDurationMin} min
+      · Remaining: ${bus.segmentRemainingMin ?? '-'} min
+    </span>
+  `;
+}
   panel.classList.add('open');
   refreshMapSize();
 

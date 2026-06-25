@@ -148,20 +148,28 @@ function tickBus201() {
   }
 
   updateBus(bus201.id, {
-    lat: bus201.lat,
-    lng: bus201.lng,
-    speed: Math.round(bus201.speed),
-    lineId: 'line-2',
-    lineName: route.name,
-    shortName: route.shortName,
-    color: route.color,
-    name: bus201.name,
-    passengers: Math.floor(Math.random() * 30) + 5,
-    isReal: false,
-    currentStop: stops[bus201.currentStopIdx]?.name,
-    nextStop: stops[nextIdx]?.name,
-    etaToNext: Math.max(0, Math.round((totalSec - bus201.segmentElapsed) / 60)),
-  });
+  lat: bus201.lat,
+  lng: bus201.lng,
+  speed: Math.round(bus201.speed),
+  lineId: 'line-2',
+  lineName: route.name,
+  shortName: route.shortName,
+  color: route.color,
+  name: bus201.name,
+  passengers: Math.floor(Math.random() * 30) + 5,
+  isReal: false,
+  currentStop: stops[bus201.currentStopIdx]?.name,
+  nextStop: stops[nextIdx]?.name,
+  etaToNext: Math.max(0, Math.round((totalSec - bus201.segmentElapsed) / 60)),
+
+  googleTrafficDurationSec: totalSec,
+  googleTrafficDurationMin: Number((totalSec / 60).toFixed(1)),
+  googleTrafficSource: 'Google Routes API - TRAFFIC_AWARE',
+  currentSegment: `${from.name} → ${to.name}`,
+  segmentElapsedSec: bus201.segmentElapsed,
+  segmentRemainingSec: Math.max(0, totalSec - bus201.segmentElapsed),
+  segmentRemainingMin: Math.max(0, Math.round((totalSec - bus201.segmentElapsed) / 60)),
+});
 }
 
 // ─── Main start ────────────────────────────────────────────────────────────

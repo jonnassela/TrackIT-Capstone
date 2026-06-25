@@ -15,6 +15,7 @@ app.use(express.static(path.join(__dirname, '../client')));
 app.use((req, res, next) => { req.io = io; next(); });
 app.use('/api', require('./routes/api'));
 
+
 const simulator = require('./services/simulator');
 simulator.start(io);
 
